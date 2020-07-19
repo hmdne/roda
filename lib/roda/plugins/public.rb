@@ -45,14 +45,25 @@ class Roda
       # :brotli :: Whether to serve already brotli-compressed files with a .br extension
       #            for clients supporting brotli transfer encoding.
       # :headers :: A hash of headers to use for statically served files
-      # :root :: Use this option for the root of the public directory (default: "public")
+      # :root :: Use this option for the root of the public directory (default: "public").
+      #          Can be an array - in which case the first directory that has a file
+      #          gets served.
       def self.configure(app, opts={})
         if opts[:root]
-          app.opts[:public_root] = app.expand_path(opts[:root])
+          app.opts[:public_root] = case opts[:root]
+          when Array
+            opts[:root].map { |i| app.expand_path(i) }
+          else
+            app.expand_path(opts[:root])
+          end
         elsif !app.opts[:public_root]
           app.opts[:public_root] = app.expand_path("public")
         end
-        app.opts[:public_server] = ::Rack::File.new(app.opts[:public_root], opts[:headers]||{}, opts[:default_mime] || 'text/plain')
+
+        app.opts[:public_servers] = Array(app.opts[:public_root]).map do |i|
+          ::Rack::File.new(i, opts[:headers]||{}, opts[:default_mime] || 'text/plain')
+        end
+
         app.opts[:public_gzip] = opts[:gzip]
         app.opts[:public_brotli] = opts[:brotli]
       end
@@ -61,19 +72,21 @@ class Roda
         # Serve files from the public directory if the file exists and this is a GET request.
         def public
           if is_get?
-            path = PARSER.unescape(real_remaining_path)
+            original_path = PARSER.unescape(real_remaining_path)
             return if path.include?("\0")
 
             roda_opts = roda_class.opts
-            server = roda_opts[:public_server]
-            path = ::File.join(server.root, *public_path_segments(path))
+            roda_opts[:public_servers].each do |server|
+              path = ::File.join(server.root, *public_path_segments(original_path))
 
-            public_serve_compressed(server, path, '.br', 'br') if roda_opts[:public_brotli]
-            public_serve_compressed(server, path, '.gz', 'gzip') if roda_opts[:public_gzip]
+              public_serve_compressed(server, path, '.br', 'br') if roda_opts[:public_brotli]
+              public_serve_compressed(server, path, '.gz', 'gzip') if roda_opts[:public_gzip]
 
-            if public_file_readable?(path)
-              halt public_serve(server, path)
+              if public_file_readable?(path)
+                halt public_serve(server, path)
+              end
             end
+            nil
           end
         end
 

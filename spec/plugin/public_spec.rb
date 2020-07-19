@@ -124,4 +124,18 @@ describe "public plugin" do
 
     status("/about/_test.erb", "REQUEST_METHOD"=>"POST").must_equal 404
   end
+
+  it "supports multiple roots" do
+    app(:bare) do
+      plugin :public, :root=>%w[spec/views/override spec/views/about spec/views], :gzip => true
+
+      route { |r| r.public }
+    end
+
+    body('/a.erb').must_equal File.read('spec/views/override/a.erb')
+    body('/b.erb').must_equal File.read('spec/views/b.erb')
+    body('/z.erb').must_equal File.read('spec/views/override/z.erb')
+    body('/_test.erb', 'HTTP_ACCEPT_ENCODING'=>'deflate, gzip, br').must_equal File.binread('spec/views/about/_test.erb.gz')
+    body('/_test.erb').must_equal File.read('spec/views/about/_test.erb')
+  end
 end
